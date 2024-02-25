@@ -1,5 +1,4 @@
 #!/bin/bash
-#SBATCH --job-name=${1}
 #SBATCH --open-mode=append
 #SBATCH --output=/scratch/%u/learning-with-preferences/slurm_output/%x_%j.out
 #SBATCH --error=/scratch/%u/learning-with-preferences/slurm_output/%x_%j.err
@@ -17,7 +16,7 @@ singularity exec --nv --overlay /scratch/lhz209/conda_envs/pref/overlay-5GB-200K
 source /ext3/env.sh
 python /scratch/lhz209/learning-with-preferences/examples/research_projects/preference_learning/train.py \
 --model_name="meta-llama/Llama-2-7b-hf" \
---output_dir="checkpoints/sft_oasst" \
+--output_dir="checkpoints/sft_oasst_${1}" \
 --roles=${1} \
 --per_device_train_batch_size=5 \
 --gradient_accumulation_steps=2 \
@@ -26,5 +25,7 @@ python /scratch/lhz209/learning-with-preferences/examples/research_projects/pref
 --eval_accumulation_steps=2 \
 --packing=True \
 --max_seq_length=2048 \
+--logging_steps=20 \
+--logging_first_step=True \
 --streaming=False
 """
