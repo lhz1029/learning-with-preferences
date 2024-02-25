@@ -144,3 +144,6 @@ checklink/cookies.txt
 nbs/wandb/
 examples/notebooks/wandb/
 wandb/
+
+# slurm
+slurm_output
