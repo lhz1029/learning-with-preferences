@@ -5,7 +5,7 @@ from typing import Optional
 
 import torch
 from accelerate import Accelerator
-from datasets import load_dataset
+from datasets import load_dataset, concatenate_datasets
 from peft import AutoPeftModelForCausalLM, LoraConfig
 from tqdm import tqdm
 from transformers import (
@@ -19,14 +19,16 @@ from transformers import (
 
 from trl import SFTTrainer
 from trl.import_utils import is_npu_available, is_xpu_available
-from trl.trainer import ConstantLengthDataset
+from trl.trainer import ConstantLengthDataset, DataCollatorForCompletionOnlyLM
+
+from data_processing import create_assistant_dataset, create_editor_dataset, create_judge_dataset
 
 
 @dataclass
 class ScriptArguments:
     model_name: Optional[str] = field(default="meta-llama/Llama-2-7b-hf", metadata={"help": "the model name"})
-    dataset_name: Optional[str] = field(default="lvwerra/stack-exchange-paired", metadata={"help": "the dataset name"})
-    subset: Optional[str] = field(default="data/finetune", metadata={"help": "the subset to use"})
+    dataset_name: Optional[str] = field(default="OpenAssistant/oasst1", metadata={"help": "the dataset name"})
+    subset: Optional[str] = field(default=None, metadata={"help": "the subset to use"})
     split: Optional[str] = field(default="train", metadata={"help": "the split to use"})
     size_valid_set: Optional[int] = field(default=4000, metadata={"help": "the size of the validation set"})
     streaming: Optional[bool] = field(default=True, metadata={"help": "whether to stream the dataset"})
@@ -39,6 +41,9 @@ class ScriptArguments:
     lora_alpha: Optional[float] = field(default=16, metadata={"help": "the lora alpha parameter"})
     lora_dropout: Optional[float] = field(default=0.05, metadata={"help": "the lora dropout parameter"})
     lora_r: Optional[int] = field(default=8, metadata={"help": "the lora r parameter"})
+
+    roles: Optional[str] = field(default="assistant", metadata={"help": "if multiple roles, separate by comma"})
+    max_seq_length: Optional[int] = field(default=1024, metadata={"help": "the maximum sequence length"})
 
 
 parser = HfArgumentParser((ScriptArguments, TrainingArguments))
@@ -95,37 +100,64 @@ def print_trainable_parameters(model):
 
 
 def prepare_sample_text(example):
-    """Prepare the text from a sample of the dataset."""
-    text = f"Question: {example['question']}\n\nAnswer: {example['response_j']}"
+    """
+    Prepare the text from a sample of the dataset.
+    Overrides the chat template from the model.
+    (We start with non-chat models anyway though, so this shouldn't matter)
+
+    """
+    text = f"###Instruction: {example['instruction']}\n\n###Response: {example['response']}"
     return text
 
 
 def create_datasets(tokenizer, args, seed=None):
-    dataset = load_dataset(
-        args.dataset_name,
-        data_dir=args.subset,
-        split=args.split,
-        use_auth_token=True,
-        num_proc=args.num_workers if not args.streaming else None,
-        streaming=args.streaming,
-    )
-    if args.streaming:
-        print("Loading the dataset in streaming mode")
-        valid_data = dataset.take(args.size_valid_set)
-        train_data = dataset.skip(args.size_valid_set)
-        train_data = train_data.shuffle(buffer_size=args.shuffle_buffer, seed=seed)
-    else:
-        dataset = dataset.train_test_split(test_size=0.005, seed=seed)
-        train_data = dataset["train"]
-        valid_data = dataset["test"]
-        print(f"Size of the train set: {len(train_data)}. Size of the validation set: {len(valid_data)}")
+    """
+    Returns dataset for training (some combination of roles) and dict of datasets for evaluation.
+    No matter the roles, the evaluation datasets are always the same.
 
-    chars_per_token = chars_token_ratio(train_data, tokenizer)
-    print(f"The character to token ratio of the dataset is: {chars_per_token:.2f}")
+    """
+    datasets = {}
+    datasets["assistant"] = create_assistant_dataset(args)
+    datasets["editor"] = create_editor_dataset(args)
+    datasets["judge"] = create_judge_dataset(args)
+    training_roles = []
+    eval_datasets = {}
+    for role in ["assistant", "editor", "judge"]:
+        dataset = datasets[role]
+        if args.streaming:
+            print("Loading the dataset in streaming mode")
+            valid_data = dataset.take(args.size_valid_set)
+            train_data = dataset.skip(args.size_valid_set)
+            train_data = train_data.shuffle(buffer_size=args.shuffle_buffer, seed=seed)
+        else:
+            dataset = dataset.train_test_split(test_size=0.005, seed=seed)
+            train_data = dataset["train"]
+            valid_data = dataset["test"]
+            print(f"Size of the train set: {len(train_data)}. Size of the validation set: {len(valid_data)}")
+
+        chars_per_token = chars_token_ratio(train_data, tokenizer)
+        print(f"The character to token ratio of the dataset is: {chars_per_token:.2f}")
+
+        # create the mixture of roles for training
+        roles = args.roles.split(",")
+        if role in roles:
+            training_roles.append(train_data)
+
+        # do not add a dataset for evaluation if we're just training on a single role
+        # (to avoid repeat evaluation of the same validation data)
+        if len(roles) > 1 or role not in roles:
+            eval_datasets[role] = ConstantLengthDataset(
+                tokenizer,
+                valid_data,
+                formatting_func=prepare_sample_text,
+                infinite=False,
+                seq_length=args.seq_length,
+                chars_per_token=chars_per_token,
+            )
 
     train_dataset = ConstantLengthDataset(
         tokenizer,
-        train_data,
+        concatenate_datasets(training_roles),
         formatting_func=prepare_sample_text,
         infinite=True,
         seq_length=args.seq_length,
@@ -139,8 +171,12 @@ def create_datasets(tokenizer, args, seed=None):
         seq_length=args.seq_length,
         chars_per_token=chars_per_token,
     )
-    return train_dataset, valid_dataset
-
+    valid_datasets = {
+        "valid": valid_dataset
+    }
+    for k in eval_datasets:
+        valid_datasets[k] = eval_datasets[k]
+    return train_dataset, valid_datasets
 
 bnb_config = BitsAndBytesConfig(
     load_in_4bit=True,
@@ -160,19 +196,34 @@ base_model.config.use_cache = False
 
 tokenizer = AutoTokenizer.from_pretrained(script_args.model_name, trust_remote_code=True)
 tokenizer.pad_token = tokenizer.eos_token
-tokenizer.padding_side = "right"  # Fix weird overflow issue with fp16 training
+# tokenizer.padding_side = "right"  # Fix weird overflow issue with fp16 training
 
-train_dataset, eval_dataset = create_datasets(tokenizer, script_args, seed=training_args.seed)
+train_dataset, eval_datasets = create_datasets(tokenizer, script_args, seed=training_args.seed)
+
+if script_args.packing:
+    data_collator = None
+else:
+    raise ValueError("Use with DataCollatorForCompletionOnlyLM not fully implemented.")
+    # TODO maybe we want CompletionOnly data collator at some point
+    # Current error:
+    # ValueError: You passed `packing=False` to the SFTTrainer, but you didn't pass a `dataset_text_field` or `formatting_func` argument.
+    data_collator = DataCollatorForCompletionOnlyLM(
+        response_template="###Response: ",
+        instruction_template="###Instruction: ",
+        tokenizer=tokenizer,
+        mlm=False,
+    )
 
 trainer = SFTTrainer(
     model=base_model,
     train_dataset=train_dataset,
-    eval_dataset=eval_dataset,
+    eval_dataset=eval_datasets,
     peft_config=peft_config,
     packing=script_args.packing,
-    max_seq_length=None,
+    max_seq_length=script_args.max_seq_length,
     tokenizer=tokenizer,
     args=training_args,
+    data_collator=data_collator,
 )
 trainer.train()
 trainer.save_model(training_args.output_dir)
