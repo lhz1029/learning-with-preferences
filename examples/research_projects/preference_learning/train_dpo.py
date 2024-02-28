@@ -79,8 +79,11 @@ class ScriptArguments:
         },
     )
     seed: Optional[int] = field(
-        default=0, metadata={"help": "Random seed that will be set at the beginning of training."}
+        default=42, metadata={"help": "Random seed that will be set at the beginning of training."}
     )
+
+    eval_accumulation_steps: Optional[int] = field(default=1, metadata={"help": "the evaluation accumulation steps"})
+    logging_first_step: Optional[bool] = field(default=False, metadata={"help": "log the first step"})
 
 
 def get_stack_exchange_paired(
@@ -125,7 +128,6 @@ def get_stack_exchange_paired(
         num_proc=num_proc,
         remove_columns=original_columns,
     )
-
 
 if __name__ == "__main__":
     parser = HfArgumentParser(ScriptArguments)
@@ -188,6 +190,8 @@ if __name__ == "__main__":
         run_name="dpo_llama2",
         gradient_checkpointing_kwargs=dict(use_reentrant=script_args.gradient_checkpointing_use_reentrant),
         seed=script_args.seed,
+        eval_accumulation_steps=script_args.eval_accumulation_steps,
+        logging_first_step=script_args.logging_first_step,
     )
 
     peft_config = LoraConfig(
@@ -219,6 +223,7 @@ if __name__ == "__main__":
         peft_config=peft_config,
         max_prompt_length=script_args.max_prompt_length,
         max_length=script_args.max_length,
+        generate_during_eval=True,
     )
 
     # 6. train
