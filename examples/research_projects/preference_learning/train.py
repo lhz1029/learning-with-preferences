@@ -46,28 +46,6 @@ class ScriptArguments:
     max_seq_length: Optional[int] = field(default=1024, metadata={"help": "the maximum sequence length"})
 
 
-parser = HfArgumentParser((ScriptArguments, TrainingArguments))
-script_args, training_args = parser.parse_args_into_dataclasses()
-peft_config = LoraConfig(
-    r=script_args.lora_r,
-    lora_alpha=script_args.lora_alpha,
-    lora_dropout=script_args.lora_dropout,
-    target_modules=["q_proj", "v_proj"],
-    bias="none",
-    task_type="CAUSAL_LM",
-)
-
-if training_args.group_by_length and script_args.packing:
-    raise ValueError("Cannot use both packing and group by length")
-
-# `gradient_checkpointing` was True by default until `1f3314`, but it's actually not used.
-# `gradient_checkpointing=True` will cause `Variable._execution_engine.run_backward`.
-if training_args.gradient_checkpointing:
-    raise ValueError("gradient_checkpointing not supported")
-
-set_seed(training_args.seed)
-
-
 def chars_token_ratio(dataset, tokenizer, nb_examples=400):
     """
     Estimate the average number of characters per token in the dataset.
@@ -178,70 +156,93 @@ def create_datasets(tokenizer, args, seed=None):
         valid_datasets[k] = eval_datasets[k]
     return train_dataset, valid_datasets
 
-bnb_config = BitsAndBytesConfig(
-    load_in_4bit=True,
-    bnb_4bit_quant_type="nf4",
-    bnb_4bit_compute_dtype=torch.bfloat16,
-)
 
-base_model = AutoModelForCausalLM.from_pretrained(
-    script_args.model_name,
-    quantization_config=bnb_config,
-    device_map={"": Accelerator().local_process_index},
-    trust_remote_code=True,
-    use_auth_token=True,
-)
-base_model.config.use_cache = False
-
-
-tokenizer = AutoTokenizer.from_pretrained(script_args.model_name, trust_remote_code=True)
-tokenizer.pad_token = tokenizer.eos_token
-# tokenizer.padding_side = "right"  # Fix weird overflow issue with fp16 training
-
-train_dataset, eval_datasets = create_datasets(tokenizer, script_args, seed=training_args.seed)
-
-if script_args.packing:
-    data_collator = None
-else:
-    raise ValueError("Use with DataCollatorForCompletionOnlyLM not fully implemented.")
-    # TODO maybe we want CompletionOnly data collator at some point
-    # Current error:
-    # ValueError: You passed `packing=False` to the SFTTrainer, but you didn't pass a `dataset_text_field` or `formatting_func` argument.
-    data_collator = DataCollatorForCompletionOnlyLM(
-        response_template="###Response: ",
-        instruction_template="###Instruction: ",
-        tokenizer=tokenizer,
-        mlm=False,
+if __name__ == "__main__":
+    parser = HfArgumentParser((ScriptArguments, TrainingArguments))
+    script_args, training_args = parser.parse_args_into_dataclasses()
+    peft_config = LoraConfig(
+        r=script_args.lora_r,
+        lora_alpha=script_args.lora_alpha,
+        lora_dropout=script_args.lora_dropout,
+        target_modules=["q_proj", "v_proj"],
+        bias="none",
+        task_type="CAUSAL_LM",
     )
 
-trainer = SFTTrainer(
-    model=base_model,
-    train_dataset=train_dataset,
-    eval_dataset=eval_datasets,
-    peft_config=peft_config,
-    packing=script_args.packing,
-    max_seq_length=script_args.max_seq_length,
-    tokenizer=tokenizer,
-    args=training_args,
-    data_collator=data_collator,
-)
-trainer.train()
-trainer.save_model(training_args.output_dir)
+    if training_args.group_by_length and script_args.packing:
+        raise ValueError("Cannot use both packing and group by length")
 
-output_dir = os.path.join(training_args.output_dir, "final_checkpoint")
-trainer.model.save_pretrained(output_dir)
+    # `gradient_checkpointing` was True by default until `1f3314`, but it's actually not used.
+    # `gradient_checkpointing=True` will cause `Variable._execution_engine.run_backward`.
+    if training_args.gradient_checkpointing:
+        raise ValueError("gradient_checkpointing not supported")
 
-# Free memory for merging weights
-del base_model
-if is_xpu_available():
-    torch.xpu.empty_cache()
-elif is_npu_available():
-    torch.npu.empty_cache()
-else:
-    torch.cuda.empty_cache()
+    set_seed(training_args.seed)
 
-model = AutoPeftModelForCausalLM.from_pretrained(output_dir, device_map="auto", torch_dtype=torch.bfloat16)
-model = model.merge_and_unload()
+    bnb_config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_compute_dtype=torch.bfloat16,
+    )
 
-output_merged_dir = os.path.join(training_args.output_dir, "final_merged_checkpoint")
-model.save_pretrained(output_merged_dir, safe_serialization=True)
+    base_model = AutoModelForCausalLM.from_pretrained(
+        script_args.model_name,
+        quantization_config=bnb_config,
+        device_map={"": Accelerator().local_process_index},
+        trust_remote_code=True,
+        use_auth_token=True,
+    )
+    base_model.config.use_cache = False
+
+
+    tokenizer = AutoTokenizer.from_pretrained(script_args.model_name, trust_remote_code=True)
+    tokenizer.pad_token = tokenizer.eos_token
+    # tokenizer.padding_side = "right"  # Fix weird overflow issue with fp16 training
+
+    train_dataset, eval_datasets = create_datasets(tokenizer, script_args, seed=training_args.seed)
+
+    if script_args.packing:
+        data_collator = None
+    else:
+        raise ValueError("Use with DataCollatorForCompletionOnlyLM not fully implemented.")
+        # TODO maybe we want CompletionOnly data collator at some point
+        # Current error:
+        # ValueError: You passed `packing=False` to the SFTTrainer, but you didn't pass a `dataset_text_field` or `formatting_func` argument.
+        data_collator = DataCollatorForCompletionOnlyLM(
+            response_template="###Response: ",
+            instruction_template="###Instruction: ",
+            tokenizer=tokenizer,
+            mlm=False,
+        )
+
+    trainer = SFTTrainer(
+        model=base_model,
+        train_dataset=train_dataset,
+        eval_dataset=eval_datasets,
+        peft_config=peft_config,
+        packing=script_args.packing,
+        max_seq_length=script_args.max_seq_length,
+        tokenizer=tokenizer,
+        args=training_args,
+        data_collator=data_collator,
+    )
+    trainer.train()
+    trainer.save_model(training_args.output_dir)
+
+    output_dir = os.path.join(training_args.output_dir, "final_checkpoint")
+    trainer.model.save_pretrained(output_dir)
+
+    # Free memory for merging weights
+    del base_model
+    if is_xpu_available():
+        torch.xpu.empty_cache()
+    elif is_npu_available():
+        torch.npu.empty_cache()
+    else:
+        torch.cuda.empty_cache()
+
+    model = AutoPeftModelForCausalLM.from_pretrained(output_dir, device_map="auto", torch_dtype=torch.bfloat16)
+    model = model.merge_and_unload()
+
+    output_merged_dir = os.path.join(training_args.output_dir, "final_merged_checkpoint")
+    model.save_pretrained(output_merged_dir, safe_serialization=True)
