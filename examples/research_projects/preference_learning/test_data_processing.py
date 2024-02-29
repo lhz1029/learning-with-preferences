@@ -16,6 +16,7 @@ class TestDataProcessing(unittest.TestCase):
         # train is 3482, 11602, 11602
         self.args.num_workers = 1
         self.args.streaming = False
+        self.df = load_original_data(self.args)
         
     def test_process_oasst1_rank(self):
         df = pd.DataFrame({
@@ -51,19 +52,19 @@ class TestDataProcessing(unittest.TestCase):
         pd.testing.assert_frame_equal(output, expected_output)
     
     def test_create_assistant_dataset(self):
-        output = create_assistant_dataset(self.args)
+        output = create_assistant_dataset(self.df)
         assert output.column_names == ["instruction", "response"]
         print(output.shape[0])
         assert output.shape[0] == 188
     
     def test_create_editor_dataset(self):
-        output = create_editor_dataset(self.args)
+        output = create_editor_dataset(self.df)
         assert output.column_names == ["instruction", "response"]
         print(output.shape[0])
         assert output.shape[0] == 531
     
     def test_create_judge_dataset(self):
-        output = create_judge_dataset(self.args)
+        output = create_judge_dataset(self.df)
         assert output.column_names == ["instruction", "response"]
         print(output.shape[0])
         assert output.shape[0] == 531

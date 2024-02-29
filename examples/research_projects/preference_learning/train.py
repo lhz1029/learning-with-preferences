@@ -7,6 +7,7 @@ import torch
 from accelerate import Accelerator
 from datasets import load_dataset, concatenate_datasets
 from peft import AutoPeftModelForCausalLM, LoraConfig
+from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 from transformers import (
     AutoModelForCausalLM,
@@ -21,7 +22,10 @@ from trl import SFTTrainer
 from trl.import_utils import is_npu_available, is_xpu_available
 from trl.trainer import ConstantLengthDataset, DataCollatorForCompletionOnlyLM
 
-from data_processing import create_assistant_dataset, create_editor_dataset, create_judge_dataset
+from data_processing import (
+    load_original_data, process_oasst1_rank,
+    create_assistant_dataset, create_editor_dataset, create_judge_dataset
+)
 
 
 @dataclass
@@ -44,6 +48,8 @@ class ScriptArguments:
 
     roles: Optional[str] = field(default="assistant", metadata={"help": "if multiple roles, separate by comma"})
     max_seq_length: Optional[int] = field(default=1024, metadata={"help": "the maximum sequence length"})
+    
+    project_name: Optional[str] = field(default="huggingface", metadata={"help": "the project name"})
 
 
 def chars_token_ratio(dataset, tokenizer, nb_examples=400):
@@ -94,44 +100,50 @@ def create_datasets(tokenizer, args, seed=None):
     No matter the roles, the evaluation datasets are always the same.
 
     """
-    datasets = {}
-    datasets["assistant"] = create_assistant_dataset(args)
-    datasets["editor"] = create_editor_dataset(args)
-    datasets["judge"] = create_judge_dataset(args)
+    if args.streaming:
+        raise NotImplementedError("Streaming not yet supported with role creation")
+    df = load_original_data(args)
+    df = process_oasst1_rank(df)
+    # make sure no instruction is repeated in the training and validation set
+    # even though there could be duplicate instructions for different message_ids
+    df.reset_index(inplace=True)
+    assert (df.index.values == df["index"].values).all()
+    grouped_indices = df.groupby("instruction")["index"].agg(list)
+    train_idx_grouped, valid_idx_grouped = train_test_split(grouped_indices.index, test_size=0.005, random_state=seed)
+    train_idx = grouped_indices[train_idx_grouped].explode().values
+    valid_idx = grouped_indices[valid_idx_grouped].explode().values
+    train_df = df.loc[train_idx]
+    valid_df = df.loc[valid_idx]
+
+    fns = {}
+    fns["assistant"] = create_assistant_dataset
+    fns["editor"] = create_editor_dataset
+    fns["judge"] = create_judge_dataset
     training_roles = []
+    validation_roles = []
     eval_datasets = {}
     for role in ["assistant", "editor", "judge"]:
-        dataset = datasets[role]
-        if args.streaming:
-            print("Loading the dataset in streaming mode")
-            valid_data = dataset.take(args.size_valid_set)
-            train_data = dataset.skip(args.size_valid_set)
-            train_data = train_data.shuffle(buffer_size=args.shuffle_buffer, seed=seed)
-        else:
-            dataset = dataset.train_test_split(test_size=0.005, seed=seed)
-            train_data = dataset["train"]
-            valid_data = dataset["test"]
-            print(f"Size of the train set: {len(train_data)}. Size of the validation set: {len(valid_data)}")
-
-        chars_per_token = chars_token_ratio(train_data, tokenizer)
-        print(f"The character to token ratio of the dataset is: {chars_per_token:.2f}")
-
         # create the mixture of roles for training
         roles = args.roles.split(",")
         if role in roles:
+            train_data = fns[role](train_df)
+            chars_per_token = chars_token_ratio(train_data, tokenizer)
+            print(f"The character to token ratio of the {role} train dataset is: {chars_per_token:.2f}")
             training_roles.append(train_data)
-
-        # do not add a dataset for evaluation if we're just training on a single role
-        # (to avoid repeat evaluation of the same validation data)
-        if len(roles) > 1 or role not in roles:
-            eval_datasets[role] = ConstantLengthDataset(
-                tokenizer,
-                valid_data,
-                formatting_func=prepare_sample_text,
-                infinite=False,
-                seq_length=args.seq_length,
-                chars_per_token=chars_per_token,
-            )
+        # create the evaluation datasets
+        valid_data = fns[role](valid_df)
+        chars_per_token = chars_token_ratio(valid_data, tokenizer)
+        eval_datasets[role] = ConstantLengthDataset(
+            tokenizer,
+            valid_data,
+            formatting_func=prepare_sample_text,
+            infinite=False,
+            seq_length=args.seq_length,
+            chars_per_token=chars_per_token,
+        )
+        # create validation data
+        if role in roles:
+            validation_roles.append(valid_data)
 
     train_dataset = ConstantLengthDataset(
         tokenizer,
@@ -143,7 +155,7 @@ def create_datasets(tokenizer, args, seed=None):
     )
     valid_dataset = ConstantLengthDataset(
         tokenizer,
-        valid_data,
+        concatenate_datasets(validation_roles),
         formatting_func=prepare_sample_text,
         infinite=False,
         seq_length=args.seq_length,
@@ -160,6 +172,7 @@ def create_datasets(tokenizer, args, seed=None):
 if __name__ == "__main__":
     parser = HfArgumentParser((ScriptArguments, TrainingArguments))
     script_args, training_args = parser.parse_args_into_dataclasses()
+    os.environ["WANDB_PROJECT"] = script_args.project_name
     peft_config = LoraConfig(
         r=script_args.lora_r,
         lora_alpha=script_args.lora_alpha,

@@ -65,53 +65,50 @@ def rank_to_pairwise(df):
             rows.append([row["instruction"], preferred, dispreferred])
     return pd.DataFrame(rows, columns=["instruction", "preferred", "dispreferred"])
 
-def create_assistant_dataset(args):
+def create_assistant_dataset(df):
     """ 
+    Assumes data is already processed as instruction, text, rank.
     Returns a Dataset. 
     Keys are instruction and responses.
     Only returns the best response of the n choices.
     
     """
-    df = load_original_data(args)
-    df = process_oasst1_rank(df)
     df["response"] = df.apply(lambda s: s["text"][s["rank"].index(min(s["rank"]))], axis=1)
     df = df[["instruction", "response"]]
     return Dataset.from_pandas(df)
 
-def create_editor_dataset(args):
+def create_editor_dataset(df):
     """ 
+    Assumes data is already processed as instruction, text, rank.
     Returns a Dataset. 
     Keys are instruction and responses.
     
     """
-    df = load_original_data(args)
-    df = process_oasst1_rank(df)
     df = rank_to_pairwise(df)
     df["instruction"] = df.apply(
-        lambda s: "Review the question and candidate answer and rewrite the answer to be higher-quality.\n\nQuestion: " + 
+        lambda s: "Review the task prompt and candidate answer and rewrite the answer to be higher-quality.\n\nTask Prompt: " + 
         s["instruction"] + "\n\nCandidate answer: " + s["dispreferred"], axis=1)
     df["response"] = df["preferred"]
     df = df[["instruction", "response"]]
     return Dataset.from_pandas(df)
 
-def create_judge_dataset(args):
+def create_judge_dataset(df):
     """ 
+    Assumes data is already processed as instruction, text, rank.
     Returns a Dataset. 
     Keys are instruction and responses.
     
     """
-    df = load_original_data(args)
-    df = process_oasst1_rank(df)
     df = rank_to_pairwise(df)
     # preferred comes first half the time
     df1, df2 = df[::2], df[1::2]
     df1["instruction"] = df1.apply(
-        lambda s: "Review the question and candidate answers and choose the answer (A or B) that is higher-quality.\n\nQuestion: " + 
+        lambda s: "Review the task prompt and candidate answers and choose the answer (A or B) that is higher-quality.\n\nTask Prompt: " + 
         s["instruction"] + "\n\nCandidate answer A: " + s["preferred"] + "\n\nCandidate answer B: " + s["dispreferred"], axis=1)
     df1["response"] = "A"
     # preferred comes second half the time
     df2["instruction"] = df2.apply(
-        lambda s: "Review the question and candidate answers and choose the answer (A or B) that is higher-quality.\n\nQuestion: " + 
+        lambda s: "Review the task prompt and candidate answers and choose the answer (A or B) that is higher-quality.\n\nTask Prompt: " + 
         s["instruction"] + "\n\nCandidate answer A: " + s["dispreferred"] + "\n\nCandidate answer B: " + s["preferred"], axis=1)
     df2["response"] = "B"
     df = pd.concat([df1[["instruction", "response"]], df2[["instruction", "response"]]], axis=0)
