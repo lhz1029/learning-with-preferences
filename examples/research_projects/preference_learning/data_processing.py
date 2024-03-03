@@ -106,12 +106,12 @@ def create_judge_dataset(df):
     df1["instruction"] = df1.apply(
         lambda s: "Review the task prompt and candidate answers and choose the answer (A or B) that is higher-quality.\n\nTask Prompt: " + 
         s["instruction"] + "\n\nCandidate answer A: " + s["preferred"] + "\n\nCandidate answer B: " + s["dispreferred"], axis=1)
-    df1["response"] = "A"
+    df1["response"] = "The better answer is candidate A"
     # preferred comes second half the time
     df2["instruction"] = df2.apply(
         lambda s: "Review the task prompt and candidate answers and choose the answer (A or B) that is higher-quality.\n\nTask Prompt: " + 
         s["instruction"] + "\n\nCandidate answer A: " + s["dispreferred"] + "\n\nCandidate answer B: " + s["preferred"], axis=1)
-    df2["response"] = "B"
+    df2["response"] = "The better answer is candidate B"
     df = pd.concat([df1[["instruction", "response"]], df2[["instruction", "response"]]], axis=0)
     return Dataset.from_pandas(df, preserve_index=False)
 
