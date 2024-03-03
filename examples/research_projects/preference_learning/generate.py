@@ -56,7 +56,7 @@ class ScriptArguments:
     
     output_dir: Optional[str] = field(default="generations", metadata={"help": "the output directory"})
     output_filename: Optional[str] = field(default="generations.jsonl", metadata={"help": "the output filename"})
-    num_prompts: Optional[int] = field(default=10, metadata={"help": "the number of prompts"})
+    num_prompts: Optional[int] = field(default=None, metadata={"help": "the number of prompts"})
 
 def load_assistant_dataset(args):
     df = load_original_data(args)
@@ -72,6 +72,14 @@ def load_judge_dataset(args):
     df = load_original_data(args)
     df = process_oasst1_rank(df)
     return create_judge_dataset(df)
+
+def format_prompt(instruction):
+    """
+    Format the prompt to match what was seen in the training data.
+
+    """
+    text = f"###Instruction: {instruction}\n\n###Response: "
+    return text
 
 if __name__ == "__main__":
     parser = HfArgumentParser(ScriptArguments)
@@ -122,11 +130,13 @@ if __name__ == "__main__":
     output_filename = os.path.join(script_args.output_dir, script_args.output_filename)
     parent_path = os.path.dirname(output_filename)
     os.makedirs(parent_path, exist_ok=True)
-    for element in dataset.select(range(script_args.num_prompts)):
-        model_inputs = tokenizer([element["instruction"]], return_tensors="pt").to("cuda")
+    dataset = dataset.select(range(script_args.num_prompts)) if script_args.num_prompts else dataset
+    for element in dataset:
+        model_inputs = tokenizer([format_prompt(element["instruction"])], return_tensors="pt").to("cuda")
         generated_ids = model.generate(**model_inputs, max_new_tokens=2048)
         output = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
         result = {"input": element["instruction"],
+                  "output": output,
                   "generation": output.split(element["instruction"], 1)[1],
                   "reference": element["response"]}
         with open(output_filename, "a") as f:
