@@ -74,6 +74,7 @@ def create_assistant_dataset(df):
     
     """
     df["response"] = df.apply(lambda s: s["text"][s["rank"].index(min(s["rank"]))], axis=1)
+    df["instruction"] = df["instruction"].apply(lambda s: "Review the task prompt and reply with a helpful answer.\n\nTask Prompt: " + s)
     df = df[["instruction", "response"]]
     return Dataset.from_pandas(df)
 
