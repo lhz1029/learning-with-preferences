@@ -90,8 +90,15 @@ def prepare_sample_text(example):
     (We start with non-chat models anyway though, so this shouldn't matter)
 
     """
-    text = f"###Instruction: {example['instruction']}\n\n###Response: {example['response']}"
+    text = f"###Instruction: {example['instruction']} ###Response: {example['response']}"
     return text
+
+def formatting_func(example):
+    output_texts = []
+    for i in range(len(example['instruction'])):
+        text = f"###Instruction: {example['instruction'][i]} ###Response: {example['response'][i]}"
+        output_texts.append(text)
+    return output_texts
 
 
 def create_datasets(tokenizer, args, seed=None):
@@ -133,34 +140,41 @@ def create_datasets(tokenizer, args, seed=None):
         # create the evaluation datasets
         valid_data = fns[role](valid_df)
         chars_per_token = chars_token_ratio(valid_data, tokenizer)
-        eval_datasets[role] = ConstantLengthDataset(
+        if args.packing:
+            eval_datasets[role] = ConstantLengthDataset(
+                tokenizer,
+                valid_data,
+                formatting_func=prepare_sample_text,
+                infinite=False,
+                seq_length=args.seq_length,
+                chars_per_token=chars_per_token,
+            )
+        else:
+            eval_datasets[role] = valid_data
+        # create validation data
+        if role in roles:
+            validation_roles.append(valid_data)
+
+    if args.packing:
+        train_dataset = ConstantLengthDataset(
             tokenizer,
-            valid_data,
+            concatenate_datasets(training_roles),
+            formatting_func=prepare_sample_text,
+            infinite=True,
+            seq_length=args.seq_length,
+            chars_per_token=chars_per_token,
+        )
+        valid_dataset = ConstantLengthDataset(
+            tokenizer,
+            concatenate_datasets(validation_roles),
             formatting_func=prepare_sample_text,
             infinite=False,
             seq_length=args.seq_length,
             chars_per_token=chars_per_token,
         )
-        # create validation data
-        if role in roles:
-            validation_roles.append(valid_data)
-
-    train_dataset = ConstantLengthDataset(
-        tokenizer,
-        concatenate_datasets(training_roles),
-        formatting_func=prepare_sample_text,
-        infinite=True,
-        seq_length=args.seq_length,
-        chars_per_token=chars_per_token,
-    )
-    valid_dataset = ConstantLengthDataset(
-        tokenizer,
-        concatenate_datasets(validation_roles),
-        formatting_func=prepare_sample_text,
-        infinite=False,
-        seq_length=args.seq_length,
-        chars_per_token=chars_per_token,
-    )
+    else:
+        train_dataset = concatenate_datasets(training_roles)
+        valid_dataset = concatenate_datasets(validation_roles)
     valid_datasets = {
         "valid": valid_dataset
     }
@@ -210,6 +224,7 @@ if __name__ == "__main__":
 
     tokenizer = AutoTokenizer.from_pretrained(script_args.model_name, trust_remote_code=True)
     tokenizer.pad_token = tokenizer.eos_token
+    print(tokenizer.padding_side)
     # tokenizer.padding_side = "right"  # Fix weird overflow issue with fp16 training
 
     train_dataset, eval_datasets = create_datasets(tokenizer, script_args, seed=training_args.seed)
@@ -217,10 +232,6 @@ if __name__ == "__main__":
     if script_args.packing:
         data_collator = None
     else:
-        raise ValueError("Use with DataCollatorForCompletionOnlyLM not fully implemented.")
-        # TODO maybe we want CompletionOnly data collator at some point
-        # Current error:
-        # ValueError: You passed `packing=False` to the SFTTrainer, but you didn't pass a `dataset_text_field` or `formatting_func` argument.
         data_collator = DataCollatorForCompletionOnlyLM(
             response_template="###Response: ",
             instruction_template="###Instruction: ",
@@ -238,6 +249,7 @@ if __name__ == "__main__":
         tokenizer=tokenizer,
         args=training_args,
         data_collator=data_collator,
+        formatting_func=None if script_args.packing else formatting_func,
     )
     trainer.train()
     trainer.save_model(training_args.output_dir)
