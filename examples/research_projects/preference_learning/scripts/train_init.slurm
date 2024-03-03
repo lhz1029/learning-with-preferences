@@ -16,7 +16,7 @@ singularity exec --nv --overlay /scratch/lhz209/conda_envs/pref/overlay-5GB-200K
 source /ext3/env.sh
 python /scratch/lhz209/learning-with-preferences/examples/research_projects/preference_learning/train.py \
 --model_name="meta-llama/Llama-2-7b-hf" \
---output_dir="checkpoints/sft_oasst_${1}" \
+--output_dir="checkpoints/sft_oasst_${1}_prompts" \
 --roles=${1} \
 --per_device_train_batch_size=5 \
 --gradient_accumulation_steps=2 \
@@ -27,5 +27,10 @@ python /scratch/lhz209/learning-with-preferences/examples/research_projects/pref
 --max_seq_length=2048 \
 --logging_steps=20 \
 --logging_first_step=True \
---streaming=False
+--streaming=False \
+--project_name="preference_roles" \
+--save_total_limit=5 \
+--num_train_epochs=8 \
+--metric_for_best_model=eval_valid_loss \
+--greater_is_better=False
 """

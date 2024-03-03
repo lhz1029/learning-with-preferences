@@ -28,7 +28,10 @@ python /scratch/lhz209/learning-with-preferences/examples/research_projects/pref
 --logging_steps=1 \
 --max_seq_length=2048 \
 --streaming=False \
---max_steps=3
+--max_steps=3 \
+--project_name="preference_roles" \
+--logging_first_step=True \
+--save_total_limit=2
 """
 
 # ${1}
