@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --open-mode=append
-#SBATCH --output=/scratch/%u/learning-with-preferences/slurm_output/%x_%j.out
-#SBATCH --error=/scratch/%u/learning-with-preferences/slurm_output/%x_%j.err
+#SBATCH --output=/scratch/%u/learning-with-preferences/slurm_output/generate_%j_%A_%a.out
+#SBATCH --error=/scratch/%u/learning-with-preferences/slurm_output/generate_%j_%A_%a.err
 #SBATCH --export=ALL
 #SBATCH --array=1-6
 #SBATCH --time=2-00:00:00
