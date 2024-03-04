@@ -115,4 +115,17 @@ def create_judge_dataset(df):
     df = pd.concat([df1[["instruction", "response"]], df2[["instruction", "response"]]], axis=0)
     return Dataset.from_pandas(df, preserve_index=False)
 
-        
+def load_assistant_dataset(args):
+    df = load_original_data(args)
+    df = process_oasst1_rank(df)
+    return create_assistant_dataset(df)
+
+def load_editor_dataset(args):
+    df = load_original_data(args)
+    df = process_oasst1_rank(df)
+    return create_editor_dataset(df)
+
+def load_judge_dataset(args):
+    df = load_original_data(args)
+    df = process_oasst1_rank(df)
+    return create_judge_dataset(df)

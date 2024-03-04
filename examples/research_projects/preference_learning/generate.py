@@ -24,7 +24,7 @@ from transformers import (
 from transformers.pipelines.pt_utils import KeyDataset
 
 from data_processing import (
-    load_original_data, process_oasst1_rank,
+    load_assistant_dataset, load_editor_dataset, load_judge_dataset,
     create_assistant_dataset, create_editor_dataset, create_judge_dataset
 )
 # from accelerate import PartialState
@@ -60,21 +60,6 @@ class ScriptArguments:
     num_prompts: Optional[int] = field(default=None, metadata={"help": "the number of prompts"})
     
     dataset_filename: Optional[str] = field(default="###Response: ", metadata={"help": "jsonl filename to initialize the dataset"})
-
-def load_assistant_dataset(args):
-    df = load_original_data(args)
-    df = process_oasst1_rank(df)
-    return create_assistant_dataset(df)
-
-def load_editor_dataset(args):
-    df = load_original_data(args)
-    df = process_oasst1_rank(df)
-    return create_editor_dataset(df)
-
-def load_judge_dataset(args):
-    df = load_original_data(args)
-    df = process_oasst1_rank(df)
-    return create_judge_dataset(df)
 
 def process_incoming(df, incoming_format):
     """
