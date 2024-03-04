@@ -59,7 +59,7 @@ class ScriptArguments:
     output_filename: Optional[str] = field(default="generations.jsonl", metadata={"help": "the output filename"})
     num_prompts: Optional[int] = field(default=None, metadata={"help": "the number of prompts"})
     
-    dataset_filename: Optional[str] = field(default="###Response: ", metadata={"help": "jsonl filename to initialize the dataset"})
+    dataset_filename: Optional[str] = field(default=None, metadata={"help": "jsonl filename to initialize the dataset"})
 
 def process_incoming(df, incoming_format):
     """
