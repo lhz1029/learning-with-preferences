@@ -1,5 +1,6 @@
 import os
 import json
+import pandas as pd
 from dataclasses import dataclass, field
 from typing import Optional
 import torch
@@ -57,6 +58,8 @@ class ScriptArguments:
     output_dir: Optional[str] = field(default="generations", metadata={"help": "the output directory"})
     output_filename: Optional[str] = field(default="generations.jsonl", metadata={"help": "the output filename"})
     num_prompts: Optional[int] = field(default=None, metadata={"help": "the number of prompts"})
+    
+    dataset_filename: Optional[str] = field(default="###Response: ", metadata={"help": "jsonl filename to initialize the dataset"})
 
 def load_assistant_dataset(args):
     df = load_original_data(args)
@@ -72,6 +75,59 @@ def load_judge_dataset(args):
     df = load_original_data(args)
     df = process_oasst1_rank(df)
     return create_judge_dataset(df)
+
+def process_incoming(df, incoming_format):
+    """
+    Note that the ranking is flipped so that the dispreferred has rank 1.
+    This way when we create the editor dataset, the dispreferred will be in the input,
+    and the preferred will be thrown away.
+    (The editor dataset is the only place the preferred vs. dispreferred distinction is important.)
+    
+    """
+    if incoming_format == "assistant":
+        df["instruction"] = df["input"].apply(lambda s: s.split("\n\nTask Prompt:")[-1])
+        df["text"] = df["generation"].apply(lambda s: s.split("\n\n###Response:", 1)[1])
+        df["text"] = df.text.apply(lambda s: [s, ""])
+        df["rank"] = [[2, 1]]*len(df)
+        return df[["instruction", "text", "rank"]]
+    elif incoming_format == "editor":
+        df["instruction"] = df["input"].apply(lambda s: s.split("\n\nTask Prompt:")[-1].split("\n\nCandidate answer:", 1)[0])
+        df["preferred"] = df["generation"].apply(lambda s: s.split("\n\n###Response:", 1)[1])
+        print(df[~df.input.str.contains("\n\nCandidate answer:")].input.values)
+        print(df[~df.input.str.contains("\n\nCandidate answer:")].index)
+        df["dispreferred"] = df["input"].apply(lambda s: s.split("\n\nCandidate answer:", 1)[1])
+        df["text"] = df.apply(lambda row: [row["preferred"], row["dispreferred"]], axis=1)
+        df["rank"] = [[2, 1]]*len(df)
+        print(df)
+        return df
+    elif incoming_format == "judge":
+        df["instruction"] = df["input"].apply(lambda s: s.split("\n\nTask Prompt:")[-1].split("\n\nCandidate answer:", 1)[0])
+        df["textA"] = df["input"].apply(lambda s: s.split("\n\nCandidate answer A:", 1)[1].split("\n\nCandidate answer B:", 1)[0])
+        df["textB"] = df["input"].apply(lambda s: s.split("\n\nCandidate answer B:", 1)[1])
+        # Note: this will prioritize B predictions in the case that the judge outputs something that is neither A nor B
+        df["rank"] = df["generation"].apply(lambda s: [2, 1] if s.endswith("A") else [1, 2])
+        return df
+
+def load_dataset_from_json(args):
+    """
+    """
+    with open(args.dataset_filename, "r") as f:
+        data = f.readlines()
+    df = pd.DataFrame([json.loads(d) for d in data])
+    # infer incoming format from the first row
+    if df["input"][0].startswith("Review the task prompt and candidate answer and rewrite the answer to be higher-quality."):
+        incoming_format = "editor"
+    elif df["input"][0].startswith("Review the task prompt and candidate answers and choose the answer (A or B) that is higher-quality."):
+        incoming_format = "judge"
+    else:
+        incoming_format = "assistant"
+    df = process_incoming(df, incoming_format)
+    # get dataset in format instruction, text, rank
+    fn = {}
+    fn["assistant"] = create_assistant_dataset
+    fn["editor"] = create_editor_dataset
+    fn["judge"] = create_judge_dataset
+    return fn[script_args.roles](df)
 
 def format_prompt(instruction):
     """
@@ -114,14 +170,17 @@ if __name__ == "__main__":
 
     tokenizer = AutoTokenizer.from_pretrained(script_args.model_name, padding_side="left")
     tokenizer.pad_token = tokenizer.eos_token  # Most LLMs don't have a pad token by default
-    print(tokenizer.pad_token_id)
+    print("tokenizer.pad_token_id", tokenizer.pad_token_id)
     
-    fn = {}
-    fn["assistant"] = load_assistant_dataset
-    fn["editor"] = load_editor_dataset
-    fn["judge"] = load_judge_dataset
-    dataset = fn[script_args.roles](script_args)
-    
+    if script_args.dataset_filename:
+        dataset = load_dataset_from_json(script_args)
+    else:
+        fn = {}
+        fn["assistant"] = load_assistant_dataset
+        fn["editor"] = load_editor_dataset
+        fn["judge"] = load_judge_dataset
+        dataset = fn[script_args.roles](script_args)
+        
     generation_config, unused_kwargs = GenerationConfig.from_pretrained(
         script_args.model_name, do_sample=True, return_unused_kwargs=True
     )
@@ -132,8 +191,16 @@ if __name__ == "__main__":
     os.makedirs(parent_path, exist_ok=True)
     dataset = dataset.select(range(script_args.num_prompts)) if script_args.num_prompts else dataset
     for element in dataset:
+        # maybe want to use a chat template at some point
+        # response_tokens = [835, 5103, 29901, 29871]
+        # print("tokenizer.pad_token_id", tokenizer.pad_token_id)
+        # print("tokenizer.pad_token", tokenizer.pad_token)
+        # print("tokenizer.chat_template", tokenizer.chat_template)
+        # print("tokenizer.default_chat_template", tokenizer.chat_template)
         model_inputs = tokenizer([format_prompt(element["instruction"])], return_tensors="pt").to("cuda")
-        generated_ids = model.generate(**model_inputs, max_new_tokens=2048)
+
+        # print(model_inputs["input_ids"].shape)
+        generated_ids = model.generate(**model_inputs, max_new_tokens=4096 - model_inputs["input_ids"].shape[1])
         output = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
         result = {"input": element["instruction"],
                   "output": output,
