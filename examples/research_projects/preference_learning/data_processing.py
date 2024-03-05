@@ -1,6 +1,6 @@
 from itertools import combinations
 import pandas as pd
-
+from sklearn.model_selection import train_test_split
 from datasets import load_dataset, Dataset
 
 
@@ -106,26 +106,67 @@ def create_judge_dataset(df):
     df1["instruction"] = df1.apply(
         lambda s: "Review the task prompt and candidate answers and choose the answer (A or B) that is higher-quality.\n\nTask Prompt: " + 
         s["instruction"] + "\n\nCandidate answer A: " + s["preferred"] + "\n\nCandidate answer B: " + s["dispreferred"], axis=1)
-    df1["response"] = "The better answer is candidate A"
+    # df1["response"] = "The better answer is candidate A"
+    df1["response"] = "A"
     # preferred comes second half the time
     df2["instruction"] = df2.apply(
         lambda s: "Review the task prompt and candidate answers and choose the answer (A or B) that is higher-quality.\n\nTask Prompt: " + 
         s["instruction"] + "\n\nCandidate answer A: " + s["dispreferred"] + "\n\nCandidate answer B: " + s["preferred"], axis=1)
-    df2["response"] = "The better answer is candidate B"
+    # df2["response"] = "The better answer is candidate B"
+    df2["response"] = "B"
     df = pd.concat([df1[["instruction", "response"]], df2[["instruction", "response"]]], axis=0)
     return Dataset.from_pandas(df, preserve_index=False)
 
 def load_assistant_dataset(args):
     df = load_original_data(args)
     df = process_oasst1_rank(df)
+    if args.split == "train":
+        df.reset_index(inplace=True)
+        assert (df.index.values == df["index"].values).all()
+        grouped_indices = df.groupby("instruction")["index"].agg(list)
+        train_idx_grouped, valid_idx_grouped = train_test_split(grouped_indices.index, test_size=0.005, random_state=args.seed)
+        train_idx = grouped_indices[train_idx_grouped].explode().values
+        valid_idx = grouped_indices[valid_idx_grouped].explode().values
+        train_df = df.loc[train_idx]
+        valid_df = df.loc[valid_idx]
+        if args.split_subset == "train":
+            df = train_df
+        elif args.split_subset == "validation":
+            df = valid_df
     return create_assistant_dataset(df)
 
 def load_editor_dataset(args):
     df = load_original_data(args)
     df = process_oasst1_rank(df)
+    if args.split == "train":
+        df.reset_index(inplace=True)
+        assert (df.index.values == df["index"].values).all()
+        grouped_indices = df.groupby("instruction")["index"].agg(list)
+        train_idx_grouped, valid_idx_grouped = train_test_split(grouped_indices.index, test_size=0.005, random_state=args.seed)
+        train_idx = grouped_indices[train_idx_grouped].explode().values
+        valid_idx = grouped_indices[valid_idx_grouped].explode().values
+        train_df = df.loc[train_idx]
+        valid_df = df.loc[valid_idx]
+        if args.split_subset == "train":
+            df = train_df
+        elif args.split_subset == "validation":
+            df = valid_df
     return create_editor_dataset(df)
 
 def load_judge_dataset(args):
     df = load_original_data(args)
     df = process_oasst1_rank(df)
+    if args.split == "train":
+        df.reset_index(inplace=True)
+        assert (df.index.values == df["index"].values).all()
+        grouped_indices = df.groupby("instruction")["index"].agg(list)
+        train_idx_grouped, valid_idx_grouped = train_test_split(grouped_indices.index, test_size=0.005, random_state=args.seed)
+        train_idx = grouped_indices[train_idx_grouped].explode().values
+        valid_idx = grouped_indices[valid_idx_grouped].explode().values
+        train_df = df.loc[train_idx]
+        valid_df = df.loc[valid_idx]
+        if args.split_subset == "train":
+            df = train_df
+        elif args.split_subset == "validation":
+            df = valid_df
     return create_judge_dataset(df)

@@ -51,6 +51,7 @@ class ScriptArguments:
     max_seq_length: Optional[int] = field(default=1024, metadata={"help": "the maximum sequence length"})
     
     project_name: Optional[str] = field(default="huggingface", metadata={"help": "the project name"})
+    turnoff_wandb: Optional[bool] = field(default=False, metadata={"help": "turn off wandb"})
 
 
 def chars_token_ratio(dataset, tokenizer, nb_examples=400):
@@ -141,41 +142,41 @@ def create_datasets(tokenizer, args, seed=None):
         # create the evaluation datasets
         valid_data = fns[role](valid_df)
         chars_per_token = chars_token_ratio(valid_data, tokenizer)
-        if args.packing:
-            eval_datasets[role] = ConstantLengthDataset(
-                tokenizer,
-                valid_data,
-                formatting_func=prepare_sample_text,
-                infinite=False,
-                seq_length=args.seq_length,
-                chars_per_token=chars_per_token,
-            )
-        else:
-            eval_datasets[role] = valid_data
+        # if args.packing:
+        #     eval_datasets[role] = ConstantLengthDataset(
+        #         tokenizer,
+        #         valid_data,
+        #         formatting_func=prepare_sample_text,
+        #         infinite=False,
+        #         seq_length=args.seq_length,
+        #         chars_per_token=chars_per_token,
+        #     )
+        # else:
+        eval_datasets[role] = valid_data
         # create validation data
         if role in roles:
             validation_roles.append(valid_data)
 
-    if args.packing:
-        train_dataset = ConstantLengthDataset(
-            tokenizer,
-            concatenate_datasets(training_roles),
-            formatting_func=prepare_sample_text,
-            infinite=True,
-            seq_length=args.seq_length,
-            chars_per_token=chars_per_token,
-        )
-        valid_dataset = ConstantLengthDataset(
-            tokenizer,
-            concatenate_datasets(validation_roles),
-            formatting_func=prepare_sample_text,
-            infinite=False,
-            seq_length=args.seq_length,
-            chars_per_token=chars_per_token,
-        )
-    else:
-        train_dataset = concatenate_datasets(training_roles)
-        valid_dataset = concatenate_datasets(validation_roles)
+    # if args.packing:
+    #     train_dataset = ConstantLengthDataset(
+    #         tokenizer,
+    #         concatenate_datasets(training_roles),
+    #         formatting_func=prepare_sample_text,
+    #         infinite=True,
+    #         seq_length=args.seq_length,
+    #         chars_per_token=chars_per_token,
+    #     )
+    #     valid_dataset = ConstantLengthDataset(
+    #         tokenizer,
+    #         concatenate_datasets(validation_roles),
+    #         formatting_func=prepare_sample_text,
+    #         infinite=False,
+    #         seq_length=args.seq_length,
+    #         chars_per_token=chars_per_token,
+    #     )
+    # else:
+    train_dataset = concatenate_datasets(training_roles)
+    valid_dataset = concatenate_datasets(validation_roles)
     valid_datasets = {
         "valid": valid_dataset
     }
@@ -221,15 +222,15 @@ class WandbPredictionProgressCallback(WandbCallback):
 
     def on_evaluate(self, args, state, control,  **kwargs):
         super().on_evaluate(args, state, control, **kwargs)
-        # control the frequency of logging by logging the predictions every `freq` epochs
-        if state.epoch % self.freq == 0:
+        # control the frequency of logging by logging the predictions every `freq` steps
+        if state.step % self.freq == 0:
           # generate predictions
           predictions = self.trainer.predict(self.sample_dataset)
           # decode predictions and labels
           predictions = decode_predictions(self.tokenizer, predictions)
           # add predictions to a wandb.Table
           predictions_df = pd.DataFrame(predictions)
-          predictions_df["epoch"] = state.epoch
+          predictions_df["step"] = state.step
           records_table = self._wandb.Table(dataframe=predictions_df)
           # log the table to wandb
           self._wandb.log({"sample_predictions": records_table})
@@ -238,7 +239,10 @@ class WandbPredictionProgressCallback(WandbCallback):
 if __name__ == "__main__":
     parser = HfArgumentParser((ScriptArguments, TrainingArguments))
     script_args, training_args = parser.parse_args_into_dataclasses()
-    os.environ["WANDB_PROJECT"] = script_args.project_name
+    if script_args.turnoff_wandb:
+        os.environ["WANDB_DISABLED"] = "true"
+    else:
+        os.environ["WANDB_PROJECT"] = script_args.project_name
     peft_config = LoraConfig(
         r=script_args.lora_r,
         lora_alpha=script_args.lora_alpha,
@@ -291,6 +295,7 @@ if __name__ == "__main__":
             mlm=False,
         )
 
+    chars_per_token = chars_token_ratio(train_dataset, tokenizer)
     trainer = SFTTrainer(
         model=base_model,
         train_dataset=train_dataset,
@@ -301,11 +306,12 @@ if __name__ == "__main__":
         tokenizer=tokenizer,
         args=training_args,
         data_collator=data_collator,
-        formatting_func=None if script_args.packing else formatting_func,
+        formatting_func=prepare_sample_text,  # formatting_func, for packing=False
+        chars_per_token=chars_per_token,
     )
     if not script_args.packing:
         # TODO: enable logging with packing=True by resolving 'ConstantLengthDataset' object has no attribute 'select'
-        progress_callback = WandbPredictionProgressCallback(trainer, tokenizer, eval_datasets["valid"], 3)# 15)
+        progress_callback = WandbPredictionProgressCallback(trainer, tokenizer, eval_datasets["valid"], num_samples=3, freq=train_args.logging_steps)# 15)
         trainer.add_callback(progress_callback)
     trainer.train()
     trainer.save_model(training_args.output_dir)
