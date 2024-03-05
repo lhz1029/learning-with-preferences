@@ -1,6 +1,7 @@
 import os
 import json
 import pandas as pd
+from accelerate import Accelerator
 from dataclasses import dataclass, field
 from typing import Optional
 import torch
@@ -36,6 +37,7 @@ class ScriptArguments:
     dataset_name: Optional[str] = field(default="OpenAssistant/oasst1", metadata={"help": "the dataset name"})
     subset: Optional[str] = field(default=None, metadata={"help": "the subset to use"})
     split: Optional[str] = field(default="validation", metadata={"help": "the split to use"})
+    split_subset: Optional[str] = field(default="validation", metadata={"help": "the subset split to use"})
     size_valid_set: Optional[int] = field(default=4000, metadata={"help": "the size of the validation set"})
     streaming: Optional[bool] = field(default=False, metadata={"help": "whether to stream the dataset"})
     shuffle_buffer: Optional[int] = field(default=5000, metadata={"help": "the shuffle buffer size"})
@@ -48,11 +50,11 @@ class ScriptArguments:
     lora_dropout: Optional[float] = field(default=0.05, metadata={"help": "the lora dropout parameter"})
     lora_r: Optional[int] = field(default=8, metadata={"help": "the lora r parameter"})
 
-    roles: Optional[str] = field(default="assistant", metadata={"help": "if multiple roles, separate by comma"})
+    role: Optional[str] = field(default="assistant", metadata={"help": "if multiple role, separate by comma"})
     max_seq_length: Optional[int] = field(default=1024, metadata={"help": "the maximum sequence length"})
     
     project_name: Optional[str] = field(default="huggingface", metadata={"help": "the project name"})
-    ckpt_path: Optional[str] = field(default="checkpoints/sft_oasst", metadata={"help": "the project name"})
+    ckpt_path: Optional[str] = field(default=None, metadata={"help": "the project name"})
     seed: Optional[int] = field(default=42, metadata={"help": "the seed"})
     
     output_dir: Optional[str] = field(default="generations", metadata={"help": "the output directory"})
@@ -71,13 +73,13 @@ def process_incoming(df, incoming_format):
     """
     if incoming_format == "assistant":
         df["instruction"] = df["input"].apply(lambda s: s.split("\n\nTask Prompt:")[-1])
-        df["text"] = df["generation"].apply(lambda s: s.split("\n\n###Response:", 1)[1])
+        df["text"] = df["generation"].apply(lambda s: s.split(" ###Response:", 1)[1])
         df["text"] = df.text.apply(lambda s: [s, ""])
         df["rank"] = [[2, 1]]*len(df)
         return df[["instruction", "text", "rank"]]
     elif incoming_format == "editor":
         df["instruction"] = df["input"].apply(lambda s: s.split("\n\nTask Prompt:")[-1].split("\n\nCandidate answer:", 1)[0])
-        df["preferred"] = df["generation"].apply(lambda s: s.split("\n\n###Response:", 1)[1])
+        df["preferred"] = df["generation"].apply(lambda s: s.split(" ###Response:", 1)[1])
         print(df[~df.input.str.contains("\n\nCandidate answer:")].input.values)
         print(df[~df.input.str.contains("\n\nCandidate answer:")].index)
         df["dispreferred"] = df["input"].apply(lambda s: s.split("\n\nCandidate answer:", 1)[1])
@@ -112,14 +114,23 @@ def load_dataset_from_json(args):
     fn["assistant"] = create_assistant_dataset
     fn["editor"] = create_editor_dataset
     fn["judge"] = create_judge_dataset
-    return fn[script_args.roles](df)
+    return fn[script_args.role](df)
 
 def format_prompt(instruction):
     """
     Format the prompt to match what was seen in the training data.
 
     """
-    text = f"###Instruction: {instruction}\n\n###Response: "
+    text = f"###Instruction: {instruction} ###Response: "
+    return text
+
+def format_prompt_mistral(instruction):
+    """
+    Format the prompt to match the mistral chat template.
+    (Also matches the llama2 chat template)
+
+    """
+    text = f"<s>[INST] {instruction} [/INST] "
     return text
 
 if __name__ == "__main__":
@@ -129,29 +140,30 @@ if __name__ == "__main__":
     set_seed(script_args.seed)
 
     print(f"Starting to load the model {script_args.model_name} into memory")
-
-    # bnb_config = BitsAndBytesConfig(
-    #     load_in_4bit=True,
-    #     bnb_4bit_quant_type="nf4",
-    #     bnb_4bit_compute_dtype=torch.bfloat16,
-    # )
-        
-    # m = AutoModelForCausalLM.from_pretrained(
-    #     script_args.model_name,
-    #     quantization_config=bnb_config,
-    #     device_map={"": Accelerator().local_process_index},
-    #     trust_remote_code=True,
-    #     use_auth_token=True,
-    # )
     
     # adapters_name = "lucas0/empath-llama-7b"
     # m = PeftModel.from_pretrained(m, adapters_name)
     # m = m.merge_and_unload()
     # tok = LlamaTokenizer.from_pretrained(model_name)
     # tok.bos_token_id = 1
-
-    model = AutoPeftModelForCausalLM.from_pretrained(script_args.ckpt_path, device_map="auto", torch_dtype=torch.bfloat16)
-    model = model.merge_and_unload()
+    if script_args.ckpt_path:
+        model = AutoPeftModelForCausalLM.from_pretrained(script_args.ckpt_path, device_map="auto", torch_dtype=torch.bfloat16)
+        model = model.merge_and_unload()
+    else:
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype=torch.bfloat16,
+        )
+            
+        model = AutoModelForCausalLM.from_pretrained(
+            script_args.model_name,
+            quantization_config=bnb_config,
+            device_map={"": Accelerator().local_process_index},
+            trust_remote_code=True,
+            use_auth_token=True,
+        )
+        
 
     tokenizer = AutoTokenizer.from_pretrained(script_args.model_name, padding_side="left")
     tokenizer.pad_token = tokenizer.eos_token  # Most LLMs don't have a pad token by default
@@ -164,7 +176,7 @@ if __name__ == "__main__":
         fn["assistant"] = load_assistant_dataset
         fn["editor"] = load_editor_dataset
         fn["judge"] = load_judge_dataset
-        dataset = fn[script_args.roles](script_args)
+        dataset = fn[script_args.role](script_args)
         
     generation_config, unused_kwargs = GenerationConfig.from_pretrained(
         script_args.model_name, do_sample=True, return_unused_kwargs=True
@@ -182,7 +194,11 @@ if __name__ == "__main__":
         # print("tokenizer.pad_token", tokenizer.pad_token)
         # print("tokenizer.chat_template", tokenizer.chat_template)
         # print("tokenizer.default_chat_template", tokenizer.chat_template)
-        model_inputs = tokenizer([format_prompt(element["instruction"])], return_tensors="pt").to("cuda")
+        if script_args.ckpt_path:
+            model_inputs = tokenizer([format_prompt(element["instruction"])], return_tensors="pt").to("cuda")
+        else:
+            model_inputs = tokenizer([format_prompt_mistral(element["instruction"])], return_tensors="pt").to("cuda")
+            print(model_inputs)
 
         # print(model_inputs["input_ids"].shape)
         generated_ids = model.generate(**model_inputs, max_new_tokens=4096 - model_inputs["input_ids"].shape[1])
@@ -199,7 +215,7 @@ if __name__ == "__main__":
     # for outputs in generator(KeyDataset(dataset.select(range(script_args.num_prompts)), "instruction")):
     #     outputs = generator(inputs)
     #     print(outputs)
-    #     results = [text.split("\n\n###Response", 1) for text in outputs]
+    #     results = [text.split(" ###Response", 1) for text in outputs]
     #     results = {text[0]: text[1] if len(text) == 2 else "" for text in results}
     #     with open(output_filename, "a") as f:
     #         f.write(json.dumps("\n".join(results) + "\n"))
