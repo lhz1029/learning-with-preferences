@@ -2,6 +2,7 @@ import os
 import json
 import pandas as pd
 from accelerate import Accelerator
+from datasets import load_dataset
 from dataclasses import dataclass, field
 from typing import Optional
 import torch

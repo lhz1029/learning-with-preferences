@@ -24,4 +24,4 @@ python  /scratch/lhz209/learning-with-preferences/examples/research_projects/pre
 python  /scratch/lhz209/learning-with-preferences/examples/research_projects/preference_learning/generate.py --model_name=meta-llama/Llama-2-70b-chat-hf --role=assistant --output_filename=llama_chat_assistant_generations.jsonl --num_prompts=2
 
 
-python  /scratch/lhz209/learning-with-preferences/examples/research_projects/preference_learning/generate.py --ckpt_path /scratch/lhz209/learning-with-preferences/checkpoints/sft_llama2_demo/ --role=assistant --output_filename=llama_sft_assistant_generations.jsonl --num_prompts=30
+python  /scratch/lhz209/learning-with-preferences/examples/research_projects/preference_learning/generate.py --ckpt_path /scratch/lhz209/learning-with-preferences/checkpoints/sft_llama2_demo/ --role=assistant --output_filename=llama_sft_assistant_generations.jsonl --num_prompts=30 --dataset_name="lvwerra/stack-exchange-paired"
