@@ -136,12 +136,12 @@ def create_datasets(tokenizer, args, seed=None):
         # create the mixture of roles for training
         roles = args.roles.split(",")
         if role in roles:
-            train_data = fns[role](train_df)
+            train_data = fns[role](train_df.copy())
             chars_per_token = chars_token_ratio(train_data, tokenizer)
             print(f"The character to token ratio of the {role} train dataset is: {chars_per_token:.2f}")
             training_roles.append(train_data)
         # create the evaluation datasets
-        valid_data = fns[role](valid_df)
+        valid_data = fns[role](valid_df.copy())
         chars_per_token = chars_token_ratio(valid_data, tokenizer)
         # if args.packing:
         #     eval_datasets[role] = ConstantLengthDataset(
