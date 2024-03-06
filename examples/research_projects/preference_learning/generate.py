@@ -185,7 +185,7 @@ if __name__ == "__main__":
         fn["judge"] = load_judge_dataset
         dataset = fn[script_args.role](script_args)
     else:
-        dataset = load_dataset(script_args.dataset_name, split="validation", data_dir=script_args.subset)
+        dataset = load_dataset(script_args.dataset_name, split=script_args.split, data_dir=script_args.subset)
         
     generation_config, unused_kwargs = GenerationConfig.from_pretrained(
         script_args.model_name, do_sample=True, return_unused_kwargs=True
@@ -205,7 +205,7 @@ if __name__ == "__main__":
         # print("tokenizer.default_chat_template", tokenizer.chat_template)
         if script_args.ckpt_path and script_args.dataset_name == "OpenAssistant/oasst1":
             model_inputs = tokenizer([format_prompt(element["instruction"])], return_tensors="pt").to("cuda")
-        elif script_args.ckpt_path and dataset_name == "lvwerra/stack-exchange-paired":
+        elif script_args.ckpt_path and script_args.dataset_name == "lvwerra/stack-exchange-paired":
             model_inputs = tokenizer([format_prompt_llama_sft(element["question"])], return_tensors="pt").to("cuda")
         else:
             model_inputs = tokenizer([format_prompt_mistral(element["instruction"])], return_tensors="pt").to("cuda")
@@ -214,10 +214,16 @@ if __name__ == "__main__":
         # print(model_inputs["input_ids"].shape)
         generated_ids = model.generate(**model_inputs, max_new_tokens=4096 - model_inputs["input_ids"].shape[1])
         output = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
-        result = {"input": element["instruction"],
-                  "output": output,
-                  "generation": output.split(element["instruction"], 1)[1],
-                  "reference": element["response"] if script_args.dataset_name == "OpenAssistant/oasst1" else element["response_j"]}
+        if script_args.dataset_name == "OpenAssistant/oasst1":
+            result = {"input": element["instruction"],
+                    "output": output,
+                    "generation": output.split(element["instruction"], 1)[1],
+                    "reference": element["response"]}
+        else:
+            result = {"input": element["question"],
+                    "output": output,
+                    "generation": output.split(element["question"], 1)[1],
+                    "reference": element["response_j"]}
         with open(output_filename, "a") as f:
             f.write(json.dumps(result) + "\n")
 
