@@ -16,9 +16,9 @@ source /ext3/env.sh
 python /scratch/lhz209/learning-with-preferences/examples/research_projects/preference_learning/train.py \
 --model_name="meta-llama/Llama-2-7b-hf" \
 --output_dir="checkpoints/dry_run" \
---roles="assistant,editor,judge" \
---per_device_train_batch_size=4 \
---gradient_accumulation_steps=2 \
+--roles="assistant,editor" \
+--per_device_train_batch_size=1 \
+--gradient_accumulation_steps=4 \
 --evaluation_strategy="steps" \
 --per_device_eval_batch_size=10 \
 --eval_accumulation_steps=2 \

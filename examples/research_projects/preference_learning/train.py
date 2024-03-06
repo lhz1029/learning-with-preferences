@@ -2,6 +2,7 @@
 import os
 from dataclasses import dataclass, field
 from typing import Optional
+import pandas as pd
 
 import torch
 from accelerate import Accelerator
@@ -223,14 +224,17 @@ class WandbPredictionProgressCallback(WandbCallback):
     def on_evaluate(self, args, state, control,  **kwargs):
         super().on_evaluate(args, state, control, **kwargs)
         # control the frequency of logging by logging the predictions every `freq` steps
-        if state.step % self.freq == 0:
+        print("state", state)
+        if state.global_step % self.freq == 0:
+          print("logging predictions")
           # generate predictions
           predictions = self.trainer.predict(self.sample_dataset)
           # decode predictions and labels
           predictions = decode_predictions(self.tokenizer, predictions)
           # add predictions to a wandb.Table
           predictions_df = pd.DataFrame(predictions)
-          predictions_df["step"] = state.step
+          print(predictions_df.head())
+          predictions_df["step"] = state.global_step
           records_table = self._wandb.Table(dataframe=predictions_df)
           # log the table to wandb
           self._wandb.log({"sample_predictions": records_table})
@@ -278,10 +282,18 @@ if __name__ == "__main__":
     base_model.config.use_cache = False
 
 
-    tokenizer = AutoTokenizer.from_pretrained(script_args.model_name, trust_remote_code=True)
-    tokenizer.pad_token = tokenizer.eos_token
-    print(tokenizer.padding_side)
-    # tokenizer.padding_side = "right"  # Fix weird overflow issue with fp16 training
+    tokenizer = AutoTokenizer.from_pretrained(script_args.model_name, trust_remote_code=True, use_fast=False, add_eos_token=False)
+    print(repr(tokenizer.pad_token)) ## None
+    print(repr(tokenizer.bos_token)) ## ''
+    print(repr(tokenizer.eos_token)) ## ''
+    print(len(tokenizer))
+    new_tokens = tokenizer.add_special_tokens({'pad_token': '[PAD]'})
+    print(len(tokenizer))
+    print("new tokens", new_tokens)
+    base_model.resize_token_embeddings(len(tokenizer))
+    # tokenizer.pad_token = tokenizer.eos_token
+    print(tokenizer.padding_side)  # already "right"
+    tokenizer.padding_side = "right"  # Fix weird overflow issue with fp16 training with padding_side == "left"
 
     train_dataset, eval_datasets = create_datasets(tokenizer, script_args, seed=training_args.seed)
 
@@ -309,10 +321,8 @@ if __name__ == "__main__":
         formatting_func=prepare_sample_text,  # formatting_func, for packing=False
         chars_per_token=chars_per_token,
     )
-    if not script_args.packing:
-        # TODO: enable logging with packing=True by resolving 'ConstantLengthDataset' object has no attribute 'select'
-        progress_callback = WandbPredictionProgressCallback(trainer, tokenizer, eval_datasets["valid"], num_samples=3, freq=train_args.logging_steps)# 15)
-        trainer.add_callback(progress_callback)
+    progress_callback = WandbPredictionProgressCallback(trainer, tokenizer, eval_datasets["valid"], num_samples=3, freq=training_args.logging_steps * 5)# 15)
+    trainer.add_callback(progress_callback)
     trainer.train()
     trainer.save_model(training_args.output_dir)
 
