@@ -7,3 +7,21 @@ python  /scratch/lhz209/learning-with-preferences/examples/research_projects/pre
 
 python  /scratch/lhz209/learning-with-preferences/examples/research_projects/preference_learning/generate.py --ckpt_path /scratch/lhz209/learning-with-preferences/checkpoints/sft_oasst_editor/checkpoint-1500 --role=editor --output_filename=editor_from_assistant_generations.jsonl --dataset_filename=/scratch/lhz209/learning-with-preferences/generations/assistant_generations.jsonl --num_prompts=2
 python  /scratch/lhz209/learning-with-preferences/examples/research_projects/preference_learning/generate.py --ckpt_path /scratch/lhz209/learning-with-preferences/checkpoints/sft_oasst_editor/checkpoint-1500 --role=editor --output_filename=editor_from_editor_generations.jsonl --dataset_filename=/scratch/lhz209/learning-with-preferences/generations/editor_generations.jsonl --num_prompts=2
+
+python  /scratch/lhz209/learning-with-preferences/examples/research_projects/preference_learning/generate.py --ckpt_path /scratch/lhz209/learning-with-preferences/checkpoints/sft/checkpoint-460 --role=assistant --output_filename=assistant_sft_short_generations.jsonl
+
+python  /scratch/lhz209/learning-with-preferences/examples/research_projects/preference_learning/generate.py --ckpt_path /scratch/lhz209/learning-with-preferences/checkpoints/sft_oasst_assistant,judge,editor_prompts/checkpoint-2000 --role=assistant --output_filename=all3_prompts_assistant_generations.jsonl
+
+python  /scratch/lhz209/learning-with-preferences/examples/research_projects/preference_learning/generate.py --ckpt_path /scratch/lhz209/learning-with-preferences/checkpoints/sft_assistant_cosine_lr --role=assistant --output_filename=assistant_cosine_lr1_generations.jsonl
+python  /scratch/lhz209/learning-with-preferences/examples/research_projects/preference_learning/generate.py --ckpt_path /scratch/lhz209/learning-with-preferences/checkpoints/sft_oasst_editor --role=editor --output_filename=editor_cosine_lr1_generations.jsonl
+python  /scratch/lhz209/learning-with-preferences/examples/research_projects/preference_learning/generate.py --ckpt_path /scratch/lhz209/learning-with-preferences/checkpoints/sft_oasst_judge --role=judge --output_filename=judge_cosine_lr1_generations.jsonl
+python  /scratch/lhz209/learning-with-preferences/examples/research_projects/preference_learning/generate.py --ckpt_path /scratch/lhz209/learning-with-preferences/checkpoints/sft_oasst_assistant,judge,editor --role=assistant --output_filename=all3_assistant_cosine_lr1_generations.jsonl
+python  /scratch/lhz209/learning-with-preferences/examples/research_projects/preference_learning/generate.py --ckpt_path /scratch/lhz209/learning-with-preferences/checkpoints/sft_oasst_assistant,judge,editor --role=editor --output_filename=all3_editor_cosine_lr1_generations.jsonl
+python  /scratch/lhz209/learning-with-preferences/examples/research_projects/preference_learning/generate.py --ckpt_path /scratch/lhz209/learning-with-preferences/checkpoints/sft_oasst_assistant,judge,editor --role=judge --output_filename=all3_judge_cosine_lr1_generations.jsonl
+
+
+python  /scratch/lhz209/learning-with-preferences/examples/research_projects/preference_learning/generate.py --model_name=mistralai/Mistral-7B-Instruct-v0.2 --role=assistant --output_filename=mistral_assistant_generations.jsonl --num_prompts=2
+python  /scratch/lhz209/learning-with-preferences/examples/research_projects/preference_learning/generate.py --model_name=meta-llama/Llama-2-70b-chat-hf --role=assistant --output_filename=llama_chat_assistant_generations.jsonl --num_prompts=2
+
+
+python  /scratch/lhz209/learning-with-preferences/examples/research_projects/preference_learning/generate.py --ckpt_path /scratch/lhz209/learning-with-preferences/checkpoints/sft_llama2_demo/ --role=assistant --output_filename=llama_sft_assistant_generations.jsonl --num_prompts=30
