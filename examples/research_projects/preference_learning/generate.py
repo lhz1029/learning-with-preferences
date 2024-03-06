@@ -133,6 +133,12 @@ def format_prompt_mistral(instruction):
     text = f"<s>[INST] {instruction} [/INST] "
     return text
 
+def format_prompt_llama_sft(instruction):
+    """Prepare the text from a sample of the dataset."""
+    text = f"Question: {instruction}\n\nAnswer: "
+    return text
+
+
 if __name__ == "__main__":
     parser = HfArgumentParser(ScriptArguments)
     script_args = parser.parse_args_into_dataclasses()[0]
@@ -171,12 +177,14 @@ if __name__ == "__main__":
     
     if script_args.dataset_filename:
         dataset = load_dataset_from_json(script_args)
-    else:
+    elif script_args.dataset_name == "OpenAssistant/oasst1":
         fn = {}
         fn["assistant"] = load_assistant_dataset
         fn["editor"] = load_editor_dataset
         fn["judge"] = load_judge_dataset
         dataset = fn[script_args.role](script_args)
+    else:
+        dataset = load_dataset(script_args.dataset_name, split="validation", data_dir=script_args.subset)
         
     generation_config, unused_kwargs = GenerationConfig.from_pretrained(
         script_args.model_name, do_sample=True, return_unused_kwargs=True
@@ -194,8 +202,10 @@ if __name__ == "__main__":
         # print("tokenizer.pad_token", tokenizer.pad_token)
         # print("tokenizer.chat_template", tokenizer.chat_template)
         # print("tokenizer.default_chat_template", tokenizer.chat_template)
-        if script_args.ckpt_path:
+        if script_args.ckpt_path and script_args.dataset_name == "OpenAssistant/oasst1":
             model_inputs = tokenizer([format_prompt(element["instruction"])], return_tensors="pt").to("cuda")
+        elif script_args.ckpt_path and dataset_name == "lvwerra/stack-exchange-paired":
+            model_inputs = tokenizer([format_prompt_llama_sft(element["question"])], return_tensors="pt").to("cuda")
         else:
             model_inputs = tokenizer([format_prompt_mistral(element["instruction"])], return_tensors="pt").to("cuda")
             print(model_inputs)
@@ -206,7 +216,7 @@ if __name__ == "__main__":
         result = {"input": element["instruction"],
                   "output": output,
                   "generation": output.split(element["instruction"], 1)[1],
-                  "reference": element["response"]}
+                  "reference": element["response"] if script_args.dataset_name == "OpenAssistant/oasst1" else element["response_j"]}
         with open(output_filename, "a") as f:
             f.write(json.dumps(result) + "\n")
 
