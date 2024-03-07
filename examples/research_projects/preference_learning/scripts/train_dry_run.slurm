@@ -16,17 +16,17 @@ source /ext3/env.sh
 python /scratch/lhz209/learning-with-preferences/examples/research_projects/preference_learning/train.py \
 --model_name="meta-llama/Llama-2-7b-hf" \
 --output_dir="checkpoints/dry_run" \
---roles="assistant,editor" \
+--roles="editor" \
 --per_device_train_batch_size=1 \
 --gradient_accumulation_steps=4 \
 --evaluation_strategy="steps" \
 --per_device_eval_batch_size=10 \
 --eval_accumulation_steps=2 \
---packing=True \
+--packing=False \
 --logging_steps=1 \
 --max_seq_length=4096 \
 --streaming=False \
---max_steps=3 \
+--max_steps=6 \
 --project_name="preference_roles" \
 --logging_first_step=True \
 --save_total_limit=2

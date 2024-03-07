@@ -17,7 +17,7 @@ singularity exec --nv --overlay /scratch/lhz209/conda_envs/pref/overlay-5GB-200K
 source /ext3/env.sh
 
 python /scratch/lhz209/learning-with-preferences/examples/research_projects/preference_learning/train.py \
-    --output_dir="checkpoints/sft_${1}_tokenization" \
+    --output_dir="checkpoints/sft_${1}_tokenization_no_packing" \
     --roles=${1} \
     --max_steps=${2} \
     --logging_steps=20 \
@@ -34,7 +34,7 @@ python /scratch/lhz209/learning-with-preferences/examples/research_projects/pref
     --optim="paged_adamw_32bit" \
     --bf16=True \
     --remove_unused_columns=False \
-    --run_name="${1}_tokenization" \
+    --run_name="${1}_tokenization_no_packing" \
     --report_to="wandb" \
     --logging_first_step=True \
     --streaming=False \
@@ -43,7 +43,8 @@ python /scratch/lhz209/learning-with-preferences/examples/research_projects/pref
     --metric_for_best_model=eval_valid_loss \
     --greater_is_better=False \
     --evaluation_strategy="steps" \
-    --eval_accumulation_steps=2
+    --eval_accumulation_steps=2 \
+    --packing=False
 
 # python /scratch/lhz209/learning-with-preferences/examples/research_projects/preference_learning/train.py \
 # --model_name="meta-llama/Llama-2-7b-hf" \

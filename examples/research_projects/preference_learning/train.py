@@ -318,7 +318,7 @@ if __name__ == "__main__":
         tokenizer=tokenizer,
         args=training_args,
         data_collator=data_collator,
-        formatting_func=prepare_sample_text,  # formatting_func, for packing=False
+        formatting_func=prepare_sample_text if script_args.packing else formatting_func,
         chars_per_token=chars_per_token,
     )
     progress_callback = WandbPredictionProgressCallback(trainer, tokenizer, eval_datasets["valid"], num_samples=3, freq=training_args.logging_steps * 5)# 15)
